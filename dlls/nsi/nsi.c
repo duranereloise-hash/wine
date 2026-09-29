@@ -51,6 +51,37 @@ static BOOL nsi_unix_fallback( void )
     return available == 1;
 }
 
+/* iOS-Madeira: row and field reads (NsiGetAllParametersEx, NsiGetParameterEx)
+ * use unix calls 1 and 2 of the same fallback. An older fallback has only
+ * call 0, and nothing checks a call number against the length of its table,
+ * so the parameter calls are made only after call 0 has shown that the
+ * fallback serves more than TCP connections: a count-only read of the NDIS
+ * interface table, which an older fallback (and MADEIRA_NSI_NETWORK_TABLES=0)
+ * refuses with STATUS_NOT_SUPPORTED. Asked once per process. */
+static BOOL nsi_unix_parameters( void )
+{
+    static LONG available = -1;
+
+    if (available == -1)
+    {
+        static const NPI_MODULEID ndis_module =
+            { sizeof(NPI_MODULEID), MIT_GUID,
+              { { 0xeb004a11, 0x9b1a, 0x11d4, { 0x91, 0x23, 0x00, 0x50, 0x04, 0x77, 0x59, 0xbc } } } };
+        struct nsi_enumerate_all_ex probe;
+        LONG value = 0;
+
+        if (nsi_unix_fallback())
+        {
+            memset( &probe, 0, sizeof(probe) );
+            probe.module = &ndis_module;
+            probe.table = NSI_NDIS_IFINFO_TABLE;
+            value = WINE_UNIX_CALL( 0, &probe ) != STATUS_NOT_SUPPORTED;
+        }
+        InterlockedExchange( &available, value );
+    }
+    return available == 1;
+}
+
 BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, void *reserved)
 {
     switch (reason)
@@ -286,7 +317,16 @@ DWORD WINAPI NsiGetAllParametersEx( struct nsi_get_all_parameters_ex *params )
     DWORD err = ERROR_SUCCESS;
     BYTE *out, *ptr;
 
-    if (device == INVALID_HANDLE_VALUE) return GetLastError();
+    if (device == INVALID_HANDLE_VALUE)
+    {
+        DWORD device_err = GetLastError();
+        NTSTATUS status;
+
+        /* iOS-Madeira: the in-process fallback; see nsi_unix_parameters() */
+        if (!nsi_unix_parameters()) return device_err;
+        status = WINE_UNIX_CALL( 1, params );
+        return status == STATUS_NOT_SUPPORTED ? device_err : RtlNtStatusToDosError( status );
+    }
 
     in = malloc( in_size );
     out = malloc( out_size );
@@ -353,7 +393,16 @@ DWORD WINAPI NsiGetParameterEx( struct nsi_get_parameter_ex *params )
     ULONG in_size = FIELD_OFFSET( struct nsiproxy_get_parameter, key[params->key_size] ), received;
     DWORD err = ERROR_SUCCESS;
 
-    if (device == INVALID_HANDLE_VALUE) return GetLastError();
+    if (device == INVALID_HANDLE_VALUE)
+    {
+        DWORD device_err = GetLastError();
+        NTSTATUS status;
+
+        /* iOS-Madeira: the in-process fallback; see nsi_unix_parameters() */
+        if (!nsi_unix_parameters()) return device_err;
+        status = WINE_UNIX_CALL( 2, params );
+        return status == STATUS_NOT_SUPPORTED ? device_err : RtlNtStatusToDosError( status );
+    }
 
     in = malloc( in_size );
     if (!in) return ERROR_OUTOFMEMORY;
