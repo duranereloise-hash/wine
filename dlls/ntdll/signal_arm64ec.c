@@ -1971,6 +1971,8 @@ static void notify_map_view_of_section( HANDLE handle, void *addr, SIZE_T size, 
 void arm64ec_notify_image_map( void *base )
 {
     static unsigned int n_map;
+    static LONG guard;  /* MADEIRA_IMAGE_MAP_GUARD, read once: 0 not yet, 1 off, 2 on */
+    BOOL entered = FALSE;
 
     /* ml710: must be the intervals-only entry point, NEVER NotifyMapViewOfSection.
      * The latter also drives ImageTracker, which takes FEX's CodeInvalidationMutex
@@ -1983,7 +1985,39 @@ void arm64ec_notify_image_map( void *base )
     n_map++;
     if (n_map <= 64)
         ERR( "[ldr-image] ml710 MAP #%u base=%p peb=%p\n", n_map, base, RtlGetCurrentPeb() );
+
+    /* The emulator's image-map handler inserts the image's executable sections
+     * while it holds its own interval lock, and the insert can allocate. When the
+     * emulator's allocator has to commit a page, the commit goes through
+     * NtAllocateVirtualMemory above, which, with InSyscallCallback clear as it is
+     * here, notifies the same emulator of the allocation. That notification takes
+     * the same interval lock, so the thread waits on itself for good with the
+     * loader lock held. Every syscall-boundary notification sets InSyscallCallback
+     * for exactly this reason: memory calls made by the notified emulator are not
+     * notified again. MADEIRA_IMAGE_MAP_GUARD=1 makes this loader-boundary
+     * notification do the same; off by default. If the flag is already set,
+     * nested notifications are already suppressed and it is left alone.
+     *
+     * Device log: a 64-bit process parked for good right after the MAP line of
+     * one of the imports of a DLL it was loading, its only thread in a wait for
+     * an alert, with one commit of an emulator-heap page between the two and no
+     * section insert logged for that image. */
+    if (!guard)
+    {
+        UNICODE_STRING name, value;
+        WCHAR buffer[2];
+
+        RtlInitUnicodeString( &name, L"MADEIRA_IMAGE_MAP_GUARD" );
+        value.Buffer = buffer;
+        value.Length = 0;
+        value.MaximumLength = sizeof(buffer);
+        guard = (!RtlQueryEnvironmentVariable_U( NULL, &name, &value ) &&
+                 value.Length == sizeof(WCHAR) && buffer[0] == '1') ? 2 : 1;
+        if (guard == 2) ERR( "[ldr-image] image-map guard on (MADEIRA_IMAGE_MAP_GUARD=1)\n" );
+    }
+    if (guard == 2) entered = enter_syscall_callback();
     pNotifyImageMap( base );
+    if (entered) leave_syscall_callback();
 }
 
 /* ml709b: UNUSED, deliberately. The loader must not call this -- see the long comment
