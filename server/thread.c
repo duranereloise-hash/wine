@@ -1319,6 +1319,19 @@ static int object_sync_signaled( struct object *obj, struct wait_queue_entry *en
     return ret;
 }
 
+#ifdef WINE_IOS
+/* Madeira fastsync: give back a token that object_sync_signaled() claimed on
+ * behalf of a wait-all that then turned out not to be satisfiable.  A no-op
+ * for every object except a cell-backed auto-reset event or semaphore. */
+static void object_sync_unclaim( struct object *obj )
+{
+    struct object *sync = get_obj_sync( obj );
+    madeira_event_sync_unclaim( sync );
+    madeira_semaphore_sync_unclaim( sync );   /* both are ops-checked */
+    release_object( sync );
+}
+#endif
+
 void signal_sync( struct object *obj )
 {
     obj->ops->signal( obj, 0, 1 );
@@ -1455,6 +1468,13 @@ static int check_wait( struct thread *thread )
         for (i = 0, entry = wait->queues; i < wait->count; i++, entry++)
             not_ok |= !object_sync_signaled( entry->obj, entry );
         if (!not_ok) return STATUS_WAIT_0;
+#ifdef WINE_IOS
+        /* Madeira fastsync: on the WaitAny path a signaled object is satisfied
+         * at once, so a claim taken in `signaled' is always consumed.  Here
+         * nothing calls satisfied, so hand every claim back. */
+        for (i = 0, entry = wait->queues; i < wait->count; i++, entry++)
+            object_sync_unclaim( entry->obj );
+#endif
     }
     else
     {
@@ -1556,6 +1576,16 @@ static void thread_timeout( void *ptr )
     wait->user = NULL;
     if (thread->wait != wait) return; /* not the top-level wait, ignore it */
     if (is_thread_suspended( thread )) return;  /* suspended, ignore it */
+
+#ifdef WINE_IOS
+    /* Madeira fastsync: ask the objects before declaring a timeout.  With
+     * cells, a client can raise an object without a request, and the
+     * wake-only request that follows can still be in the socket when this
+     * timer fires; wake_thread() runs check_wait(), which tests the objects
+     * first and otherwise returns the same STATUS_TIMEOUT by the same path.
+     * Only while fastsync cells exist; otherwise upstream's order. */
+    if (madeira_fastsync_cells_on() && wake_thread( thread ) != 0) return;
+#endif
 
     if (debug_level) fprintf( stderr, "%04x: *wakeup* signaled=TIMEOUT\n", thread->id );
     end_wait( thread, STATUS_TIMEOUT );
