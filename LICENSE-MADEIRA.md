@@ -29,6 +29,11 @@ distributes under **LGPL-2.1-or-later**. This branch keeps that licence.
     `e9289051644` (ntdll per-thread WoW64), `1a73c698b8c` (win32u per-process
     state), `f9074408fd9` (server WoW64 thread contexts), `059cb1923c0` (AFD
     pointers, I/O status owner, volume serial).
+  - `56f69bc7528` dinput: opt-in joystick backed by the Madeira host gamepad slot.
+    Author: 125hz. Merged from pull request #3 on 2026-09-29.
+  - `3ba35adcbdd` server iOS: queue a process-wide system APC on a live thread when
+    none can be signalled. Author: 125hz. Merged from pull request #13 on
+    2026-09-29.
 
 The LGPL permits combining this library with proprietary components (such
 as Apple's Metal Shader Converter) subject to LGPL-2.1 section 6; see the
