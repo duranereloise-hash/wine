@@ -1741,10 +1741,13 @@ static inline int is_in_apc_wait( struct thread *thread )
  * The client half of APC_ASYNC_IO is not tied to the issuing thread (queue_apc already hands it
  * to another thread of the process when the issuer has exited), and the server wakes one alerted
  * async per queue at a time, so ordering on a socket is unchanged. So instead of dropping it: give
- * it to a thread of the same process that is waiting in the server, or, if none is, leave it
- * queued on the issuing thread, which runs it at its next server wait. Only this failure path
- * changes, and only for APC_ASYNC_IO; other system APCs are unchanged. [apc-requeue] logs the
- * first 16 handovers (then every 1024th) with the APC's status and thread ids only.
+ * it to a thread of the same process that is waiting in the server. If none is, it is dropped as
+ * before. It is never left queued on the busy thread: that thread's next wait may be an in-process
+ * one (on the very event this I/O will set), which a system APC does not interrupt, since only
+ * user APCs signal alert_sync. Explorer's first RPC call to services.exe hung that way on every
+ * virtual desktop start, and the taskbar never painted. Only this failure path changes, and only
+ * for APC_ASYNC_IO; other system APCs are unchanged. [apc-requeue] logs the first 16 handovers
+ * (then every 1024th) with the APC's status and thread ids only.
  * MADEIRA_APC_REQUEUE=0 restores the drop. */
 static int ios_apc_requeue_enabled( void )
 {
@@ -1753,7 +1756,7 @@ static int ios_apc_requeue_enabled( void )
     if (enabled < 0)
     {
         /* On by default: an async I/O completion for a busy thread goes to a waiting thread of
-         * its process, or waits on that thread, instead of failing the I/O. 0 drops it again. */
+         * its process, if there is one, instead of failing the I/O. 0 always drops it again. */
         const char *e = getenv( "MADEIRA_APC_REQUEUE" );
         enabled = !(e && e[0] == '0');
         fprintf( stderr, "[apc-requeue] %s (MADEIRA_APC_REQUEUE=0 restores dropping async I/O APCs "
@@ -1766,7 +1769,7 @@ static int ios_apc_requeue_enabled( void )
 static struct thread *ios_apc_requeue_target( struct thread *thread, const struct thread_apc *apc )
 {
     static unsigned int count;
-    struct thread *candidate, *target = thread;
+    struct thread *candidate, *target = NULL;
 
     if (apc->call.type != APC_ASYNC_IO || !ios_apc_requeue_enabled()) return NULL;
     LIST_FOR_EACH_ENTRY( candidate, &thread->process->thread_list, struct thread, proc_entry )
@@ -1782,7 +1785,7 @@ static struct thread *ios_apc_requeue_target( struct thread *thread, const struc
     if (count <= 16 || !(count & 1023))
         fprintf( stderr, "[apc-requeue] #%u async I/O APC status=%08x for busy thread %04x -> %s %04x\n",
                  count, apc->call.async_io.status, thread->id,
-                 target == thread ? "kept on" : "waiting thread", target->id );
+                 target ? "waiting thread" : "dropped, no waiting thread", target ? target->id : 0 );
     return target;
 }
 
