@@ -65,11 +65,12 @@
 # include <mach/mach_init.h>
 # include <mach/mach_host.h>
 # include <mach/vm_map.h>
-# if !TARGET_OS_TV
-#  include <IOKit/IOKitLib.h>
-#  include <IOKit/ps/IOPSKeys.h>
-#  include <IOKit/ps/IOPowerSources.h>
-# endif
+/* IOKit.framework does not exist in the tvOS SDK; a compile-only shim under
+ * build/ntdll-unix/shims/IOKit/ provides the handful of types/functions these
+ * probes use, so keep the includes unconditional on Darwin. */
+# include <IOKit/IOKitLib.h>
+# include <IOKit/ps/IOPSKeys.h>
+# include <IOKit/ps/IOPowerSources.h>
 #endif
 
 #if defined(HAVE_LIBHWLOC)
