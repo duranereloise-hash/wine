@@ -2188,8 +2188,10 @@ static LONGLONG get_free_bytes_for_important_data(int fd)
     if (!(path = malloc( MAXPATHLEN ))) goto done;
     if (fcntl( fd, F_GETPATH, path ) == -1) goto done;
     if (!(url = CFURLCreateFromFileSystemRepresentation( NULL, (UInt8 *)path, strlen(path), false ))) goto done;
+#if !TARGET_OS_TV
     if (!CFURLCopyResourcePropertyForKey( url, kCFURLVolumeAvailableCapacityForImportantUsageKey, &num, NULL )) goto done;
     CFNumberGetValue( num, kCFNumberLongLongType, &space );
+#endif
 
 done:
     free( path );

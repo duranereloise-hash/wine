@@ -59,14 +59,16 @@
 #endif
 #ifdef __APPLE__
 # include <CoreFoundation/CoreFoundation.h>
-# include <IOKit/IOKitLib.h>
-# include <IOKit/ps/IOPSKeys.h>
-# include <IOKit/ps/IOPowerSources.h>
 # include <mach/mach.h>
 # include <mach/machine.h>
 # include <mach/mach_init.h>
 # include <mach/mach_host.h>
 # include <mach/vm_map.h>
+# if !TARGET_OS_TV
+#  include <IOKit/IOKitLib.h>
+#  include <IOKit/ps/IOPSKeys.h>
+#  include <IOKit/ps/IOPowerSources.h>
+# endif
 #endif
 
 #if defined(HAVE_LIBHWLOC)
