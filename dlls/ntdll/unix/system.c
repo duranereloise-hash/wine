@@ -58,6 +58,7 @@
 # include <sys/auxv.h>
 #endif
 #ifdef __APPLE__
+# include <TargetConditionals.h>
 # include <CoreFoundation/CoreFoundation.h>
 # include <mach/mach.h>
 # include <mach/machine.h>
