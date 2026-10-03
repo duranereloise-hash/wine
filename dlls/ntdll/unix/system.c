@@ -65,6 +65,20 @@
 # include <mach/mach_init.h>
 # include <mach/mach_host.h>
 # include <mach/vm_map.h>
+# if TARGET_OS_TV
+#  include <dlfcn.h>
+/* tvOS SDK marks host_info unavailable although the syscall exists. */
+#  define host_info madeira_tvos_host_info
+static inline kern_return_t madeira_tvos_host_info(mach_port_t host, int flavor,
+                                                   host_info_t info, mach_msg_type_number_t *count)
+{
+    typedef kern_return_t (*fn_t)(mach_port_t, int, host_info_t, mach_msg_type_number_t *);
+    static fn_t fn;
+    if (!fn) fn = (fn_t)dlsym(RTLD_DEFAULT, "host_info");
+    if (!fn) return KERN_FAILURE;
+    return fn(host, flavor, info, count);
+}
+# endif
 /* IOKit.framework does not exist in the tvOS SDK; a compile-only shim under
  * build/ntdll-unix/shims/IOKit/ provides the handful of types/functions these
  * probes use, so keep the includes unconditional on Darwin. */
