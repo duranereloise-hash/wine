@@ -3793,6 +3793,13 @@ static NTSTATUS nt_to_unix_file_name_no_root( OBJECT_ATTRIBUTES *attr, UNICODE_S
             struct stat cst;
             if (lstat( check, &cst ) == -1)
             {
+                static int ios_drive_c_logged = 0;
+                if (ios_drive_c_logged < 4)
+                {
+                    ios_drive_c_logged++;
+                    fprintf( stderr, "[drvc] WINE_IOS C: fallback name_len=%u prefix_len=%u config_dir=%s\n",
+                             (unsigned)name_len, (unsigned)prefix_len, config_dir );
+                }
                 const char *drive_c = "/drive_c";
                 if (prefix_len == name_len)  /* plain drive open: point to drive_c root */
                 {
@@ -3805,21 +3812,24 @@ static NTSTATUS nt_to_unix_file_name_no_root( OBJECT_ATTRIBUTES *attr, UNICODE_S
                     free( check );
                     return STATUS_SUCCESS;
                 }
-                /* subdir case: replace "/dosdevices/c" (built at pos-2..) with
-                 * "/drive_c", keeping the remainder. unix_name is
-                 * "<config_dir>/dosdevices/c" right now (ret==2), the NT rest
-                 * is still in nt_name and lookup_unix_name appends it below
-                 * starting at pos. So simply rebuild the base to drive_c and
-                 * leave pos at its new length. */
+                /* subdir case: rewrite the *base* buffer in place. unix_name
+                 * holds "<config_dir>/dosdevices/c" (ret==2). Replace the
+                 * "/dosdevices/c" suffix with "/drive_c" and fix up pos so
+                 * lookup_unix_name appends the NT remainder after the new
+                 * base. Same length as the original allocation safely holds it. */
                 {
-                    char *alt = malloc( strlen(config_dir) + strlen(drive_c) + 1 );
-                    if (!alt) { free( check ); free( unix_name ); return STATUS_NO_MEMORY; }
-                    strcpy( alt, config_dir );
-                    strcat( alt, drive_c );
-                    free( unix_name );
-                    unix_name = alt;
-                    pos = strlen(unix_name);
-                    ret = 0;
+                    char *base = unix_name;              /* points at "<config_dir>/dosdevices/c" */
+                    char *dc = strstr( base, "/dosdevices/c" );
+                    size_t keep, dlen;
+                    if (dc)
+                    {
+                        keep = dc - base;                 /* length of "<config_dir>" */
+                        dlen = strlen(drive_c);           /* 8 */
+                        strcpy( dc, drive_c );            /* over "dosdevices/c" (12 chars) - shrinks, OK */
+                        unix_name[keep + dlen] = 0;
+                        pos = keep + dlen;
+                        ret = 0;
+                    }
                 }
             }
             free( check );
