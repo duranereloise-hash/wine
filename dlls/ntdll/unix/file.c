@@ -3777,6 +3777,56 @@ static NTSTATUS nt_to_unix_file_name_no_root( OBJECT_ATTRIBUTES *attr, UNICODE_S
         return STATUS_OBJECT_NAME_INVALID;
     }
 
+#ifdef WINE_IOS
+    /* tvOS sandbox rejects symlink() inside the container (measured: the
+     * seed's createSymbolicLinkAtPath for dosdevices/c: -> ../drive_c returns
+     * NO), so <config_dir>/dosdevices/c: never exists and every C:\ path open
+     * fails with STATUS_OBJECT_PATH_NOT_FOUND. When the c: device entry is
+     * absent, resolve the prefix straight to <config_dir>/drive_c.
+     * The lstat guard keeps the normal symlink path for hosts where wine's
+     * own setup_config_dir created it (plain iOS). */
+    if (prefix_len == 2 && prefix[0] == 'c' && prefix[1] == ':')
+    {
+        char *check = NULL;
+        if (asprintf( &check, "%s/dosdevices/c:", config_dir ) != -1)
+        {
+            struct stat cst;
+            if (lstat( check, &cst ) == -1)
+            {
+                const char *drive_c = "/drive_c";
+                if (prefix_len == name_len)  /* plain drive open: point to drive_c root */
+                {
+                    free( unix_name );
+                    unix_name = malloc( strlen(config_dir) + strlen(drive_c) + 1 );
+                    if (!unix_name) { free( check ); return STATUS_NO_MEMORY; }
+                    strcpy( unix_name, config_dir );
+                    strcat( unix_name, drive_c );
+                    *unix_name_ret = unix_name;
+                    free( check );
+                    return STATUS_SUCCESS;
+                }
+                /* subdir case: replace "/dosdevices/c" (built at pos-2..) with
+                 * "/drive_c", keeping the remainder. unix_name is
+                 * "<config_dir>/dosdevices/c" right now (ret==2), the NT rest
+                 * is still in nt_name and lookup_unix_name appends it below
+                 * starting at pos. So simply rebuild the base to drive_c and
+                 * leave pos at its new length. */
+                {
+                    char *alt = malloc( strlen(config_dir) + strlen(drive_c) + 1 );
+                    if (!alt) { free( check ); free( unix_name ); return STATUS_NO_MEMORY; }
+                    strcpy( alt, config_dir );
+                    strcat( alt, drive_c );
+                    free( unix_name );
+                    unix_name = alt;
+                    pos = strlen(unix_name);
+                    ret = 0;
+                }
+            }
+            free( check );
+        }
+    }
+#endif
+
     if (prefix_len == name_len)  /* no subdir, plain DOS device */
     {
         unix_name[pos + ret] = 0;
