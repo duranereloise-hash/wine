@@ -3799,6 +3799,8 @@ static NTSTATUS nt_to_unix_file_name_no_root( OBJECT_ATTRIBUTES *attr, UNICODE_S
                     ios_drive_c_logged++;
                     fprintf( stderr, "[drvc] WINE_IOS C: fallback name_len=%u prefix_len=%u config_dir=%s\n",
                              (unsigned)name_len, (unsigned)prefix_len, config_dir );
+                    extern void madeira_crash_log(const char *fmt, ...);
+                    madeira_crash_log("[drvc] C: fallback name_len=%u prefix_len=%u", (unsigned)name_len, (unsigned)prefix_len);
                 }
                 const char *drive_c = "/drive_c";
                 if (prefix_len == name_len)  /* plain drive open: point to drive_c root */
